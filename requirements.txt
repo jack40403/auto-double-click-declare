@@ -1,0 +1,9 @@
+pyautogui
+keyboard
+customtkinter
+easyocr
+opencv-python
+pillow
+pygetwindow
+pywin32
+beautifulsoup4
