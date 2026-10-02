@@ -81,6 +81,7 @@ class AutomationEngine:
             medicine_field_pattern = re.compile(
                 r"\b[A-Z]{2}[0-9]{8}\b.*?健保價", re.IGNORECASE
             )
+            declaration_error_pattern = re.compile(r"申報金額\s*交叉\s*不平衡")
             serials = []
             chunks = []
             table_has_error_column = False
@@ -133,7 +134,11 @@ class AutomationEngine:
                         cells = row.find_all(['th', 'td'], recursive=False)
                         if error_column_index >= len(cells):
                             continue
-                        if not medicine_field_pattern.search(row.get_text(' ', strip=True)):
+                        row_text = row.get_text(' ', strip=True)
+                        if not (
+                            medicine_field_pattern.search(row_text)
+                            or declaration_error_pattern.search(row_text)
+                        ):
                             continue
 
                         error_serial = cells[error_column_index].get_text(' ', strip=True)
@@ -181,6 +186,8 @@ class AutomationEngine:
                             continue
 
                         medicine_match = medicine_field_pattern.search(text)
+                        declaration_error_match = declaration_error_pattern.search(text)
+                        target_match = medicine_match or declaration_error_match
                         error_label = error_label_pattern.search(text)
 
                         if error_label:
@@ -201,7 +208,7 @@ class AutomationEngine:
                             current_error_serial = text
                             waiting_for_error_serial = False
 
-                        if medicine_match and current_error_serial and not waiting_for_error_serial:
+                        if target_match and current_error_serial and not waiting_for_error_serial:
                             serials.append(current_error_serial)
 
             # 同一個錯誤序號可能對應多個藥品欄位，只保留一次並維持出現順序。
