@@ -5,7 +5,7 @@ import logging
 # 設定日誌以便除錯
 log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_log.txt")
 logging.basicConfig(filename=log_file, level=logging.DEBUG, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+                    format='%(asctime)s - %(levelname)s - %(message)s', encoding="utf-8")
 logging.info("程式啟動中...")
 
 try:
@@ -15,7 +15,7 @@ try:
     import threading
     import pyautogui
     import keyboard
-    from Automation_Engine import AutomationEngine
+    from Automation_Engine import AutomationEngine, F10_BUILD
     from Vision_Helper import VisionHelper
     import ctypes
 except Exception as e:
@@ -39,7 +39,7 @@ class PharmacyApp(ctk.CTk):
         super().__init__()
         
         # 標題與大小
-        self.title("藥局調劑作業自動化助手 (手動校準版)")
+        self.title(f"藥局調劑作業自動化助手 ({F10_BUILD})")
         self.geometry("600x580")
         logging.info("視窗基礎參數設定完成。")
 
@@ -51,6 +51,7 @@ class PharmacyApp(ctk.CTk):
         # 配置 UI (先畫介面)
         logging.info("正在建構使用者介面元件...")
         self._setup_ui()
+        self._log(f"程式版本：{F10_BUILD}")
         logging.info("使用者介面元件建構完成。")
         
         # 異步初始化引擎以免視窗卡住
@@ -82,13 +83,25 @@ class PharmacyApp(ctk.CTk):
         self.btn_select_file = ctk.CTkButton(self.file_frame, text="1. 選取序號文檔", command=self._select_file)
         self.btn_select_file.pack(side="left", padx=10, pady=10)
 
-        self.btn_process_html = ctk.CTkButton(self.file_frame, text="0. 整理報表 (HTML 轉序號)", 
+        self.btn_process_html = ctk.CTkButton(self.file_frame, text="0. 整理報表 (HTML 擷取錯誤序號)", 
                                            fg_color="#3498DB", hover_color="#2980B9",
                                            command=self._process_html_report)
         self.btn_process_html.pack(side="left", padx=10, pady=10)
 
         self.lbl_file_path = ctk.CTkLabel(self.file_frame, text="尚未選取檔案", text_color="gray")
         self.lbl_file_path.pack(side="left", padx=10)
+
+        # 銷售月份由使用者手動設定，格式為民國年三碼加月份兩碼。
+        self.sales_month_var = tk.StringVar(value="11510")
+        self.month_frame = ctk.CTkFrame(self)
+        self.month_frame.pack(pady=4, padx=20, fill="x")
+        self.lbl_sales_month = ctk.CTkLabel(self.month_frame, text="銷售月份（民國年月 5 碼）")
+        self.lbl_sales_month.pack(side="left", padx=(10, 6), pady=8)
+        self.entry_sales_month = ctk.CTkEntry(
+            self.month_frame, width=120, textvariable=self.sales_month_var,
+            placeholder_text="例如 11510"
+        )
+        self.entry_sales_month.pack(side="left", padx=6, pady=8)
 
         # 2. 手動校準區域
         self.calib_frame = ctk.CTkFrame(self)
@@ -104,7 +117,7 @@ class PharmacyApp(ctk.CTk):
         # 狀態顯示區
         self.textbox = ctk.CTkTextbox(self, width=560, height=180)
         self.textbox.pack(pady=10, padx=20)
-        self.textbox.insert("0.0", "【使用說明】\n1. 選取序號文檔。\n2. 若自動定位不到，請按「設定點擊位置」，將滑鼠移到「調劑日期」欄位上方並按 Ctrl。\n3. 點擊「開始執行」。\n")
+        self.textbox.insert("0.0", "【使用說明】\n1. 設定銷售月份（民國年月 5 碼，例如 11510）；F10 會辨識月份與序號欄，月份不同才修改月份，再切到序號欄比對／輸入末四位。\n2. 按「整理報表」選取申報預審 HTML；同一錯誤序號有多個藥品時只處理一次。\n   或按「選取序號文檔」載入已整理好的 TXT。\n3. 按「設定點擊位置」，將滑鼠移到藥局系統的「調劑日期」欄位上方並按 Ctrl。\n4. 確認藥局系統畫面可操作後，按「開始執行」。\n")
 
         # 控制按鈕區域
         self.btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -151,9 +164,11 @@ class PharmacyApp(ctk.CTk):
             messagebox.showwarning("警告", "引擎尚未就緒，請稍候。")
             return
             
+        desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+        initial_dir = desktop_path if os.path.isdir(desktop_path) else os.path.dirname(os.path.abspath(__file__))
         path = filedialog.askopenfilename(title="選取原始 HTML 報表", 
                                          filetypes=[("HTML files", "*.html;*.htm"), ("All files", "*.*")],
-                                         initialdir=r"\\1002vpn2-pc\1002vpn-2(C)")
+                                         initialdir=initial_dir)
         if not path:
             return
             
@@ -174,11 +189,28 @@ class PharmacyApp(ctk.CTk):
             messagebox.showerror("失敗", "報表處理失敗，請檢查檔案格式或內容。")
 
     def _log(self, message):
-        self.textbox.insert("end", f"> {message}\n")
-        self.textbox.see("end")
+        logging.info(message)
+        def append_message():
+            self.textbox.insert("end", f"> {message}\n")
+            self.textbox.see("end")
+        if threading.current_thread() is threading.main_thread():
+            append_message()
+        else:
+            self.after(0, append_message)
 
     def _start_automation(self):
         passed_path = self.file_path
+        sales_month = self.sales_month_var.get().strip()
+
+        if not (
+            sales_month.isascii()
+            and sales_month.isdigit()
+            and len(sales_month) == 5
+            and 1 <= int(sales_month[-2:]) <= 12
+        ):
+            messagebox.showwarning("銷售月份格式錯誤", "請輸入民國年月 5 碼，例如 11510。")
+            self.entry_sales_month.focus_set()
+            return
         
         # 檢查是否有未完成的任務
         if os.path.exists(self.engine.task_file):
@@ -199,7 +231,7 @@ class PharmacyApp(ctk.CTk):
         self.btn_start.configure(state="disabled")
         
         thread = threading.Thread(target=self.engine.process_document, 
-                                  args=(passed_path, self._log), daemon=True)
+                                  args=(passed_path, self._log, sales_month), daemon=True)
         thread.start()
         self._monitor_thread(thread)
 
@@ -239,12 +271,13 @@ if __name__ == "__main__":
         work_dir = os.path.dirname(script_path)
         # 用雙引號包好路徑以防空白或括號造成解析失敗
         params = f'"{script_path}"'
-        python_exe = f'"{sys.executable}"'
         try:
-            # 這裡我們不包 python_exe 的引號在 ShellExecuteW 的第三個參數中，
-            # 因為 ShellExecuteW 自己會處理執行檔路徑，但在某些情況下傳引號反而會錯。
-            # 直接使用原生的 sys.executable，但加強錯誤捕捉。
-            ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, work_dir, 1)
+            # ShellExecuteW 的執行檔路徑獨立傳入，參數則保留腳本路徑引號。
+            result = ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, params, work_dir, 1)
+            if result <= 32:
+                raise OSError(f"Windows 無法以管理員權限重新啟動程式 (ShellExecuteW={result})")
+            sys.exit(0)
         except Exception as e:
             logging.error(f"提權啟動失敗: {e}", exc_info=True)
             input(f"提權啟動失敗: {e}\n請按 Enter 鍵離開...")
+            sys.exit(1)

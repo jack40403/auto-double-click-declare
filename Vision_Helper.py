@@ -1,5 +1,7 @@
 import pyautogui
 import easyocr
+from easyocr.config import recognition_models
+from easyocr.utils import calculate_md5
 import numpy as np
 from PIL import Image
 import cv2
@@ -14,6 +16,8 @@ class VisionHelper:
         self.model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
         if not os.path.exists(self.model_path):
             os.makedirs(self.model_path)
+
+        self._remove_corrupt_recognition_model()
             
         try:
             self.reader = easyocr.Reader(['ch_tra', 'en'], model_storage_directory=self.model_path)
@@ -21,6 +25,15 @@ class VisionHelper:
         except Exception as e:
             print(f"辨識引擎裝載失敗: {e}")
             raise
+
+    def _remove_corrupt_recognition_model(self):
+        """移除損毀的繁體中文模型，避免 EasyOCR 1.7.2 的損毀分支崩潰。"""
+        model = recognition_models['gen1']['zh_tra_g1']
+        model_file = os.path.join(self.model_path, model['filename'])
+
+        if os.path.isfile(model_file) and calculate_md5(model_file) != model['md5sum']:
+            print(f"繁體中文辨識模型校驗失敗，移除損毀檔案並重新下載：{model_file}")
+            os.remove(model_file)
     
     def find_text_position(self, target_text="調劑日期", window_title=None):
         """
