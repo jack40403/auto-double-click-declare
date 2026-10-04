@@ -15,7 +15,7 @@ import ctypes
 from ctypes import wintypes
 import logging
 
-F10_BUILD = "F10-20261002.4"
+F10_BUILD = "F10-20261002.5"
 
 class AutomationEngine:
     def __init__(self, vision_helper):
